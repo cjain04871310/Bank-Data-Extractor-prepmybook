@@ -1,0 +1,137 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Bank Template - Learned patterns for each bank/account type
+model BankTemplate {
+  id            String   @id @default(cuid())
+  bankName      String
+  accountType   String?
+  patterns      String   // JSON string of learned patterns
+  columnMapping String   // JSON string of column mappings
+  timesUsed     Int      @default(0)
+  successRate   Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([bankName, accountType])
+
+  statements BankStatement[]
+}
+
+// Bank Statement - Processed statement metadata
+model BankStatement {
+  id              String   @id @default(cuid())
+  fileName        String
+  bankName        String
+  accountNumber   String
+  accountHolder   String?
+  accountType     String?
+  statementFrom   DateTime?
+  statementTo     DateTime?
+  openingBalance  Float    @default(0)
+  closingBalance  Float    @default(0)
+  totalCredits    Float    @default(0)
+  totalDebits     Float    @default(0)
+  
+  // Validation
+  isValid         Boolean  @default(true)
+  validationNotes String?  // JSON string of validation details
+  
+  // Issues detected
+  hasMissingPages Boolean  @default(false)
+  missingPages    String?  // JSON string of missing page info
+  hasDateGaps     Boolean  @default(false)
+  dateGaps        String?  // JSON string of date gap info
+  
+  // Processing info
+  extractionMethod String? // "template" or "vlm"
+  templateId      String?
+  rawText         String?
+  processingTime  Int?     // milliseconds
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  template        BankTemplate? @relation(fields: [templateId], references: [id])
+  transactions    Transaction[]
+  groupedEntries  GroupedStatement[]
+
+  @@index([accountNumber])
+  @@index([statementFrom])
+}
+
+// Transaction - Individual transaction records
+model Transaction {
+  id           String   @id @default(cuid())
+  date         DateTime?
+  description  String?
+  amount       Float    @default(0)
+  balance      Float?
+  type         String   // "credit" or "debit"
+  confidence   Float?   // Extraction confidence 0-1
+  sortOrder    Int      @default(0)
+  rawText      String?  // Original text if parsing uncertain
+  
+  statementId  String
+  statement    BankStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId, sortOrder])
+  @@index([date])
+}
+
+// Statement Group - Groups statements by account for continuity
+model StatementGroup {
+  id             String   @id @default(cuid())
+  accountNumber  String
+  bankName       String
+  totalStatements Int    @default(0)
+  totalTransactions Int  @default(0)
+  dateRangeFrom  DateTime?
+  dateRangeTo    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  statements     GroupedStatement[]
+
+  @@unique([accountNumber, bankName])
+}
+
+// Grouped Statement - Links statements to groups for continuity checking
+model GroupedStatement {
+  id              String   @id @default(cuid())
+  groupId         String
+  statementId     String
+  orderIndex      Int      @default(0) // Order in the group
+  
+  // Continuity check
+  previousClosing Float?
+  currentOpening  Float?
+  isContinuous    Boolean  @default(true)
+  
+  group           StatementGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  statement       BankStatement  @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, statementId])
+  @@index([groupId, orderIndex])
+}
+
+// Feedback Report - User submitted issues for Admin review
+model FeedbackReport {
+  id               String   @id @default(cuid())
+  fileName         String
+  issueDescription String
+  pdfBase64        String   // Storing base64 content for replay (Ensure 5MB limit in API)
+  status           String   @default("PENDING") // PENDING, RESOLVED, DISMISSED
+  adminNotes       String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
