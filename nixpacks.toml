@@ -1,0 +1,12 @@
+# Nixpacks configuration to support both Bun and Python
+[phases.setup]
+nixPkgs = ["bun", "python311", "gcc"]
+
+[phases.install]
+cmds = ["bun install", "pip install -r requirements.txt"]
+
+[phases.build]
+cmds = ["bun run build", "bunx prisma generate"]
+
+[start]
+cmd = "bun run start"
